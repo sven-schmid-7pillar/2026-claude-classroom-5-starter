@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - run: npm ci
+
+      # Nothing in CI calls a model, so the OpenRouter key is a placeholder;
+      # the auth secret only has to exist for this run.
+      - name: Write .env
+        run: |
+          cat > .env <<ENV
+          DATABASE_URL=file:./data/app.db
+          OPENROUTER_API_KEY=sk-or-v1-ci-placeholder
+          BETTER_AUTH_SECRET=$(openssl rand -base64 32)
+          BETTER_AUTH_URL=http://localhost:3000
+          ENV
+
+      - run: npm run lint
+      - run: npm test
+      - run: npm run db:migrate
+      - run: npm run build
+
+      - run: npx playwright install --with-deps chromium
+
+      # playwright.config.ts skips *.llm.spec.ts unless E2E_LLM is set; the
+      # extra html reporter gives the failure upload something to open.
+      - run: npx playwright test --reporter=list,html
+
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 14
